@@ -41,10 +41,16 @@ function renderQrMatrixRgba(uri: string, transparentBg = false): {
 describe('gauth capture & QR extraction', () => {
   const originalDocument = globalThis.document;
   const originalHtmlCanvasElement = globalThis.HTMLCanvasElement;
+  const originalMutationObserver = globalThis.MutationObserver;
+  const originalChrome = (globalThis as { chrome?: unknown }).chrome;
+  const originalCreateImageBitmap = globalThis.createImageBitmap;
 
   afterEach(() => {
     globalThis.document = originalDocument;
     globalThis.HTMLCanvasElement = originalHtmlCanvasElement;
+    globalThis.MutationObserver = originalMutationObserver;
+    (globalThis as { chrome?: unknown }).chrome = originalChrome;
+    globalThis.createImageBitmap = originalCreateImageBitmap;
   });
 
   it('detects 4-digit PIN near code label on gauth page', () => {
@@ -237,5 +243,70 @@ describe('gauth capture & QR extraction', () => {
     } finally {
       globalThis.MutationObserver = origMutationObserver;
     }
+  });
+
+  it('gauth-capture prevents concurrent scans via scanning mutex and disconnects MutationObserver after capture', async () => {
+    const uri = 'otpauth://totp/HUJI:000000018?secret=JBSWY3DPEHPK3PXP&issuer=HUJI';
+    const { rgba, width } = renderQrMatrixRgba(uri);
+
+    const dom = new JSDOM('<body><svg></svg><div>PIN: 2468</div></body>');
+    const doc = dom.window.document;
+
+    // Mock offscreen canvas creation used inside drawOnCanvas for bitmap decoding
+    const origCreateElement = doc.createElement.bind(doc);
+    doc.createElement = ((tag: string) => {
+      const created = origCreateElement(tag);
+      if (tag === 'canvas') {
+        (created as unknown as { getContext: () => unknown }).getContext = () => ({
+          fillStyle: '',
+          fillRect: () => {},
+          drawImage: () => {},
+          getImageData: () => ({ data: rgba, width, height: width })
+        });
+      }
+      return created;
+    }) as typeof doc.createElement;
+
+    let resolveBitmap!: (b: ImageBitmap) => void;
+    const createBitmapMock = vi.fn(
+      () =>
+        new Promise<ImageBitmap>((r) => {
+          resolveBitmap = r;
+        })
+    );
+    globalThis.createImageBitmap = createBitmapMock as unknown as typeof createImageBitmap;
+
+    const disconnectSpy = vi.spyOn(dom.window.MutationObserver.prototype, 'disconnect');
+
+    (globalThis as unknown as { chrome: unknown }).chrome = {
+      storage: {
+        local: { get: async () => ({}) },
+        session: { get: async () => ({}) }
+      },
+      runtime: {
+        onMessage: { addListener: () => {} }
+      }
+    };
+
+    globalThis.document = doc;
+    globalThis.MutationObserver = dom.window.MutationObserver;
+    vi.resetModules();
+    await import('../../src/content/gauth-capture');
+
+    await vi.waitFor(() => {
+      expect(createBitmapMock).toHaveBeenCalledTimes(1);
+    });
+
+    // Trigger DOM mutation while initial scan is still in flight
+    doc.body.appendChild(doc.createElement('span'));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(createBitmapMock).toHaveBeenCalledTimes(1);
+
+    resolveBitmap({ width, height: width, close: () => {} } as unknown as ImageBitmap);
+
+    await vi.waitFor(() => {
+      expect(doc.getElementById('huji-key-gauth-banner')).not.toBeNull();
+    });
+    expect(disconnectSpy).toHaveBeenCalledTimes(1);
   });
 });

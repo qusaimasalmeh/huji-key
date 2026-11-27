@@ -61,4 +61,30 @@ describe('Moodle keep-alive classifier', () => {
       })
     ).toEqual({ outcome: 'ok', sesskey: 'AbCdEf1234' });
   });
+
+  it('returns retry_get for HTTP 200 non-JSON AJAX payloads and logged_out for login markup', () => {
+    expect(
+      classifyKeepAliveResult({
+        status: 200,
+        bodyText: '<html>unexpected proxy page</html>',
+        expectJson: true
+      }).outcome
+    ).toBe('retry_get');
+
+    expect(
+      classifyKeepAliveResult({
+        status: 200,
+        bodyText: '<form id="login">Sign in</form>',
+        expectJson: true
+      })
+    ).toEqual({ outcome: 'logged_out', reason: 'login_markup' });
+
+    expect(
+      classifyKeepAliveResult({
+        status: 200,
+        bodyText: 'https://idp.cc.huji.ac.il/simplesaml/saml2/idp/SSOService.php',
+        expectJson: true
+      })
+    ).toEqual({ outcome: 'logged_out', reason: 'login_markup' });
+  });
 });

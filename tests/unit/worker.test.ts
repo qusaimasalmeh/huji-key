@@ -52,6 +52,7 @@ const CREDS: PlainCredentials = {
 };
 
 describe('background worker core', () => {
+  const originalChrome = (globalThis as { chrome?: unknown }).chrome;
   const alarmsCreated: Array<{ name: string; info: unknown }> = [];
   const alarmsCleared: string[] = [];
   const openOptionsPage = vi.fn(async () => {});
@@ -127,6 +128,7 @@ describe('background worker core', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    (globalThis as { chrome?: unknown }).chrome = originalChrome;
   });
 
   it('unlocks encrypted credentials into session storage and locks back', async () => {
@@ -412,5 +414,96 @@ describe('background worker core', () => {
         data: { status: 'unconfigured' }
       });
     });
+  });
+
+  it('falls back to GET /my/ on HTTP 200 non-JSON AJAX response and flags SAML markup as logged_out', async () => {
+    await updateKeepAliveSiteState('moodle', { status: 'ok', sesskey: 'stale1' });
+
+    const nonJsonFallbackFetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('<html>Maintenance</html>', { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response('<a href="/login/logout.php?sesskey=freshHtml2">Logout</a>', { status: 200 })
+      ) as unknown as typeof fetch;
+
+    const recovered = await pingMoodleSite('moodle', nonJsonFallbackFetch);
+    expect(nonJsonFallbackFetch).toHaveBeenCalledTimes(2);
+    expect(recovered.status).toBe('ok');
+    expect(recovered.sesskey).toBe('freshHtml2');
+
+    const samlAjaxFetch = vi.fn(async () =>
+      new Response('<html>Redirecting to https://idp.cc.huji.ac.il/simplesaml</html>', {
+        status: 200
+      })
+    ) as unknown as typeof fetch;
+
+    const loggedOut = await pingMoodleSite('moodle', samlAjaxFetch);
+    expect(samlAjaxFetch).toHaveBeenCalledTimes(1);
+    expect(loggedOut.status).toBe('logged_out');
+    expect(loggedOut.sesskey).toBeUndefined();
+  });
+
+  it('forces PING_KEEPALIVE_NOW check on logged_out sites even when site is omitted', async () => {
+    await updateSettings({ keepAliveMoodle: true, keepAliveCsMoodle: false });
+    await updateKeepAliveSiteState('moodle', {
+      status: 'logged_out',
+      lastError: 'redirected',
+      sesskey: undefined
+    });
+
+    const fetchMock = vi.fn(async () =>
+      new Response('<a href="/login/logout.php?sesskey=recovered9">Logout</a>', { status: 200 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await handleRuntimeMessage({ type: 'PING_KEEPALIVE_NOW' });
+    expect(res.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const states = await getKeepAliveStates();
+    expect(states.moodle.status).toBe('ok');
+    expect(states.moodle.sesskey).toBe('recovered9');
+  });
+
+  it('guards invalid CAPTURE_OPEN_GAUTH responses, clears lastError on logged-out report, falls back on DOMException, and handles OPEN_OPTIONS', async () => {
+    tabsQuery.mockResolvedValueOnce([{ id: 7 }]);
+    tabsSendMessage.mockResolvedValueOnce(undefined);
+    expect(await handleRuntimeMessage({ type: 'CAPTURE_OPEN_GAUTH' })).toEqual({
+      ok: false,
+      error: 'no_qr_found'
+    });
+
+    tabsQuery.mockResolvedValueOnce([{ id: 7 }]);
+    tabsSendMessage.mockResolvedValueOnce({ unexpected: true });
+    expect(await handleRuntimeMessage({ type: 'CAPTURE_OPEN_GAUTH' })).toEqual({
+      ok: false,
+      error: 'no_qr_found'
+    });
+
+    await updateKeepAliveSiteState('moodle', { status: 'error', lastError: 'old_err' });
+    await handleRuntimeMessage({
+      type: 'REPORT_MOODLE_SESSION',
+      origin: 'https://moodle.huji.ac.il',
+      loggedIn: false
+    });
+    expect((await getKeepAliveStates()).moodle.lastError).toBeUndefined();
+
+    const domExFetch = vi.fn(async () => {
+      throw new DOMException('', 'AbortError');
+    }) as unknown as typeof fetch;
+    const pingErr = await pingMoodleSite('moodle', domExFetch);
+    expect(pingErr.status).toBe('error');
+    expect(pingErr.lastError).toBe('AbortError');
+
+    tabsQuery.mockRejectedValueOnce(new DOMException('', 'OperationError'));
+    expect(await handleRuntimeMessage({ type: 'CAPTURE_OPEN_GAUTH' })).toEqual({
+      ok: false,
+      error: 'OperationError'
+    });
+
+    expect(await handleRuntimeMessage({ type: 'OPEN_OPTIONS' } as RuntimeMessage)).toEqual({
+      ok: true,
+      data: true
+    });
+    expect(openOptionsPage).toHaveBeenCalledTimes(1);
   });
 });

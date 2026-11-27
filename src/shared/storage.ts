@@ -90,7 +90,12 @@ export async function setUnlockedCredentials(creds: PlainCredentials | null): Pr
 
 export async function getLoginGuard(): Promise<LoginAttemptGuard> {
   const res = await ext.storage.session.get('loginAttemptGuard');
-  return (res.loginAttemptGuard as LoginAttemptGuard | undefined) ?? EMPTY_LOGIN_GUARD;
+  return (
+    (res.loginAttemptGuard as LoginAttemptGuard | undefined) ?? {
+      ...EMPTY_LOGIN_GUARD,
+      attempts: []
+    }
+  );
 }
 
 export async function setLoginGuard(guard: LoginAttemptGuard): Promise<void> {

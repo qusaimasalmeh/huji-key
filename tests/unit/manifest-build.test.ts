@@ -27,10 +27,16 @@ describe('Chrome and Firefox MV3 builds', () => {
       expect(fs.existsSync(path.join(dir, manifest.action.default_popup))).toBe(true);
       expect(fs.existsSync(path.join(dir, manifest.options_ui.page))).toBe(true);
 
+      expect(fs.existsSync(path.join(dir, 'background/worker.js'))).toBe(true);
+      for (const cs of manifest.content_scripts as Array<{ js?: string[] }>) {
+        for (const scriptPath of cs.js ?? []) {
+          expect(fs.existsSync(path.join(dir, scriptPath))).toBe(true);
+        }
+      }
+
       if (target === 'chrome') {
         expect(manifest.background.service_worker).toBe('background/worker.js');
         expect(manifest.background.scripts).toBeUndefined();
-        expect(fs.existsSync(path.join(dir, 'background/worker.js'))).toBe(true);
       } else {
         expect(manifest.background.scripts).toEqual(['background/worker.js']);
         expect(manifest.background.service_worker).toBeUndefined();

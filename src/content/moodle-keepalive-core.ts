@@ -5,8 +5,9 @@ export function inspectMoodleDom(
   doc: Document,
   currentUrl: string
 ): { origin: string; loggedIn: boolean; sesskey?: string } {
-  const origin = new URL(currentUrl).origin;
-  const isLoginRoute = currentUrl.includes('/login/');
+  const parsedUrl = new URL(currentUrl);
+  const origin = parsedUrl.origin;
+  const isLoginRoute = parsedUrl.pathname.includes('/login/');
   const hasLoginForm = Boolean(doc.querySelector('form#login, .loginform'));
 
   if (isLoginRoute || hasLoginForm) {
@@ -23,10 +24,11 @@ export function inspectMoodleDom(
     extractSesskeyFromHtml(doc.documentElement?.innerHTML ?? '');
 
   const hasUserShell = Boolean(
-    logoutLink || doc.querySelector('#user-menu-toggle, .usermenu .userbutton, [data-userid]')
+    logoutLink ||
+      doc.querySelector('#user-menu-toggle, .usermenu .userbutton, [data-userid]:not([data-userid="0"])')
   );
 
-  if (!hasUserShell && !sesskey) {
+  if (!hasUserShell) {
     return { origin, loggedIn: false };
   }
 

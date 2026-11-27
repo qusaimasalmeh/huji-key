@@ -72,8 +72,10 @@ describe('Popup & Options UI accessibility and RTL/LTR', () => {
   const originalChrome = (globalThis as { chrome?: unknown }).chrome;
   const originalNavigator = globalThis.navigator;
   const originalPrompt = globalThis.prompt;
+  const originalCreateImageBitmap = globalThis.createImageBitmap;
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
     if (globalThis.window && typeof globalThis.window.dispatchEvent === 'function') {
       try {
@@ -86,6 +88,7 @@ describe('Popup & Options UI accessibility and RTL/LTR', () => {
     globalThis.window = originalWindow;
     (globalThis as { chrome?: unknown }).chrome = originalChrome;
     globalThis.prompt = originalPrompt;
+    globalThis.createImageBitmap = originalCreateImageBitmap;
     Object.defineProperty(globalThis, 'navigator', {
       value: originalNavigator,
       configurable: true
@@ -502,6 +505,220 @@ describe('Popup & Options UI accessibility and RTL/LTR', () => {
     optDoc.getElementById('btn-scan-gauth')?.click();
     await vi.waitFor(() => {
       expect(optDoc.getElementById('gauth-scan-msg')?.textContent).toContain('No QR code');
+    });
+  });
+
+  it('guards popup sendMessage rejections, stale live-OTP writes, clipboard failures, and rapid-copy timer resets', async () => {
+    const html = fs.readFileSync(path.resolve('src/popup/popup.html'), 'utf8');
+    const dom = new JSDOM(html, { url: 'https://extension.local/popup.html' });
+    const doc = dom.window.document;
+
+    const creds = {
+      id9: '000000018',
+      pin4: '1234',
+      totpSecret: 'JBSWY3DPEHPK3PXP',
+      issuer: 'HUJI',
+      digits: 6,
+      period: 30,
+      algorithm: 'SHA-1' as const
+    };
+    let locked = false;
+    const { chromeMock, sendMessage } = createChromeMock({
+      settings: { language: 'en', lockEnabled: true, autoFill: true, autoSubmit: true }
+    });
+    sendMessage.mockImplementation(async (msg: { type: string }) => {
+      if (msg.type === 'GET_CREDENTIALS_STATUS') {
+        return { ok: true, data: locked ? { status: 'locked' } : { status: 'ready', credentials: creds } };
+      }
+      if (msg.type === 'LOCK_CREDENTIALS') {
+        locked = true;
+        return { ok: true, data: { status: 'locked' } };
+      }
+      throw new Error('worker offline');
+    });
+
+    const realSign = globalThis.crypto.subtle.sign.bind(globalThis.crypto.subtle);
+    let resolveFirstSign!: (buf: ArrayBuffer) => void;
+    const signSpy = vi
+      .spyOn(globalThis.crypto.subtle, 'sign')
+      .mockImplementationOnce(
+        () =>
+          new Promise<ArrayBuffer>((r) => {
+            resolveFirstSign = r;
+          })
+      )
+      .mockImplementation((...args) => realSign(...args));
+
+    const writeText = vi.fn(async () => undefined);
+    globalThis.document = doc;
+    globalThis.window = dom.window as unknown as Window & typeof globalThis;
+    (globalThis as { chrome?: unknown }).chrome = chromeMock;
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { clipboard: { writeText } },
+      configurable: true
+    });
+
+    vi.resetModules();
+    await import('../../src/popup/popup');
+    doc.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
+
+    await vi.waitFor(() => {
+      expect(signSpy).toHaveBeenCalledTimes(1);
+    });
+
+    // Lock before first generateTotp finishes -> stale OTP must NOT overwrite #live-otp-code
+    doc.getElementById('btn-lock-now')?.click();
+    await vi.waitFor(() => {
+      expect(doc.getElementById('view-locked')?.hidden).toBe(false);
+    });
+
+    resolveFirstSign(new Uint8Array(20).buffer);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(doc.getElementById('live-otp-code')?.textContent).toBe('------');
+
+    // Re-open in unlocked state and verify rejected sendMessage on switches/ping/lock
+    locked = false;
+    const kaToggle = doc.getElementById('toggle-ka-moodle') as HTMLInputElement;
+    kaToggle.checked = false;
+    kaToggle.dispatchEvent(new dom.window.Event('change'));
+    doc.getElementById('btn-ping-now')?.click();
+    await vi.waitFor(() => {
+      expect(doc.getElementById('view-otp')?.hidden).toBe(false);
+      expect(doc.getElementById('live-otp-code')?.textContent).not.toBe('------');
+    });
+
+    // Rejected LOCK_CREDENTIALS also resolves cleanly without throwing
+    const callsBeforeLock = sendMessage.mock.calls.length;
+    sendMessage.mockRejectedValueOnce(new Error('worker gone'));
+    doc.getElementById('btn-lock-now')?.click();
+    await vi.waitFor(() => {
+      expect(sendMessage.mock.calls.length).toBeGreaterThanOrEqual(callsBeforeLock + 2);
+      expect(sendMessage).toHaveBeenLastCalledWith({ type: 'GET_CREDENTIALS_STATUS' });
+    });
+    await new Promise((r) => setTimeout(r, 15));
+
+    // Clipboard failure does not reject or set "Copied!"
+    writeText.mockRejectedValueOnce(new Error('clipboard denied'));
+    doc.getElementById('btn-copy-6')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(doc.getElementById('btn-copy-6')?.textContent).toBe('Copy 6-digit OTP');
+
+    // Rapid double copy clears first timer so label stays "Copied!" past first 1200ms window
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    writeText.mockResolvedValue(undefined);
+    doc.getElementById('btn-copy-6')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(doc.getElementById('btn-copy-6')?.textContent).toBe('Copied!');
+    await vi.advanceTimersByTimeAsync(800);
+    doc.getElementById('btn-copy-6')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(writeText).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(500); // 1300ms after 1st click, 500ms after 2nd click
+    expect(doc.getElementById('btn-copy-6')?.textContent).toBe('Copied!');
+    await vi.advanceTimersByTimeAsync(800);
+    expect(doc.getElementById('btn-copy-6')?.textContent).toBe('Copy 6-digit OTP');
+  });
+
+  it('guards options sendMessage rejections, stale preview writes, and clears qr-file-input value after change', async () => {
+    const html = fs.readFileSync(path.resolve('src/options/options.html'), 'utf8');
+    const dom = new JSDOM(html, { url: 'https://extension.local/options.html' });
+    const doc = dom.window.document;
+
+    const { chromeMock, sendMessage } = createChromeMock();
+    sendMessage.mockRejectedValue(new Error('worker offline'));
+
+    const realSign = globalThis.crypto.subtle.sign.bind(globalThis.crypto.subtle);
+    let resolvePreviewSign!: (buf: ArrayBuffer) => void;
+    const signSpy = vi
+      .spyOn(globalThis.crypto.subtle, 'sign')
+      .mockImplementationOnce(
+        () =>
+          new Promise<ArrayBuffer>((r) => {
+            resolvePreviewSign = r;
+          })
+      )
+      .mockImplementation((...args) => realSign(...args));
+
+    globalThis.createImageBitmap = vi.fn(async () => {
+      throw new Error('bad image');
+    }) as unknown as typeof createImageBitmap;
+
+    globalThis.document = doc;
+    globalThis.window = dom.window as unknown as Window & typeof globalThis;
+    (globalThis as { chrome?: unknown }).chrome = chromeMock;
+
+    vi.resetModules();
+    await import('../../src/options/options');
+    doc.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
+
+    await vi.waitFor(() => {
+      expect(doc.getElementById('otpauth-uri')?.getAttribute('placeholder')).toContain('otpauth://');
+    });
+
+    // Stale preview write: type valid secret -> clear before sign resolves -> preview stays ------
+    const secretEl = doc.getElementById('input-secret') as HTMLInputElement;
+    secretEl.value = 'JBSWY3DPEHPK3PXP';
+    secretEl.dispatchEvent(new dom.window.Event('input'));
+
+    await vi.waitFor(() => {
+      expect(signSpy).toHaveBeenCalledTimes(1);
+    });
+
+    secretEl.value = '';
+    secretEl.dispatchEvent(new dom.window.Event('input'));
+    expect(doc.getElementById('preview-code')?.textContent).toBe('------');
+
+    resolvePreviewSign(new Uint8Array(20).buffer);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(doc.getElementById('preview-code')?.textContent).toBe('------');
+
+    // SendMessage rejections on interval, CS toggle, and reset guard do not throw or fake success
+    const intervalEl = doc.getElementById('select-interval') as HTMLSelectElement;
+    intervalEl.value = '10';
+    intervalEl.dispatchEvent(new dom.window.Event('change'));
+
+    const csToggle = doc.getElementById('opt-ka-cs') as HTMLInputElement;
+    csToggle.checked = true;
+    csToggle.dispatchEvent(new dom.window.Event('change'));
+
+    doc.getElementById('btn-reset-guard')?.click();
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith({ type: 'RESET_LOGIN_GUARD' });
+    });
+    await new Promise((r) => setTimeout(r, 15));
+    expect(doc.getElementById('safety-msg')?.textContent).toBe('');
+
+    // File input resets its value to '' after processing a file
+    const fileInput = doc.getElementById('qr-file-input') as HTMLInputElement;
+    const protoDesc = Object.getOwnPropertyDescriptor(
+      dom.window.HTMLInputElement.prototype,
+      'value'
+    )!;
+    const valueSetterSpy = vi.fn();
+    Object.defineProperty(fileInput, 'value', {
+      configurable: true,
+      get() {
+        return protoDesc.get!.call(this);
+      },
+      set(val: string) {
+        valueSetterSpy(val);
+        protoDesc.set!.call(this, val);
+      }
+    });
+    const fakeFile = new dom.window.File(['not-a-qr'], 'qr.png', { type: 'image/png' });
+    Object.defineProperty(fileInput, 'files', {
+      configurable: true,
+      value: [fakeFile]
+    });
+    fileInput.dispatchEvent(new dom.window.Event('change'));
+
+    await vi.waitFor(() => {
+      expect(valueSetterSpy).toHaveBeenCalledWith('');
     });
   });
 });

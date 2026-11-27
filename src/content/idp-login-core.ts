@@ -6,15 +6,12 @@ import {
   resetAutoSubmitGuard
 } from '../core/loop-guard';
 import { generateTotp, getTotpWindowInfo } from '../core/totp';
-import type {
-  CredentialAvailability,
-  Language,
-  PlainCredentials,
-  RuntimeResponse
-} from '../core/types';
+import type { CredentialAvailability, Language, PlainCredentials } from '../core/types';
 import { formatCombinedOtp } from '../core/validation';
-import { ext } from '../shared/browser';
+import { safeSendMessage } from '../shared/browser';
 import { getLoginGuard, getSettings, setLoginGuard } from '../shared/storage';
+
+let inFlight = false;
 
 /** Returns true when the SimpleSAML IdP login page displays a non-empty error alert. */
 export function hasIdpPageError(doc: Document): boolean {
@@ -69,7 +66,7 @@ function renderStatusPill(
   lang: Language,
   text: string,
   tone: 'info' | 'warn' | 'muted',
-  action?: { label: string; onClick: () => void }
+  action?: { label: string; onClick: (btn: HTMLButtonElement) => void }
 ): void {
   const form = doc.getElementById('hujicc-form-otp');
   if (!form) return;
@@ -106,7 +103,7 @@ function renderStatusPill(
       'style',
       'border:1px solid currentColor;background:#FFFFFF;color:inherit;border-radius:6px;padding:3px 10px;font:600 12px/1.3 system-ui,sans-serif;cursor:pointer;white-space:nowrap;'
     );
-    btn.addEventListener('click', action.onClick);
+    btn.addEventListener('click', () => action.onClick(btn));
     children.push(btn);
   }
 
@@ -140,86 +137,118 @@ export async function runIdpAutoLogin(
   opts: { nowMs?: number; recaptchaWaitMs?: number; forceRetry?: boolean } = {}
 ): Promise<void> {
   if (!doc.getElementById('hujicc-form-otp')) return;
+  if (inFlight) return;
 
-  const settings = await getSettings();
-  if (!settings.autoFill && !opts.forceRetry) return;
+  inFlight = true;
+  try {
+    const settings = await getSettings();
+    if (!settings.autoFill && !opts.forceRetry) return;
 
-  ensureOtpTabActive(doc);
+    ensureOtpTabActive(doc);
 
-  const res = (await ext.runtime.sendMessage({
-    type: 'GET_CREDENTIALS_STATUS'
-  })) as RuntimeResponse<CredentialAvailability> | undefined;
-
-  if (!res?.ok) return;
-
-  if (res.data.status === 'unconfigured') {
-    renderStatusPill(doc, settings.language, t(settings.language, 'idpBadgeUnconfigured'), 'muted');
-    return;
-  }
-
-  if (res.data.status === 'locked') {
-    renderStatusPill(doc, settings.language, t(settings.language, 'idpBadgeLocked'), 'warn');
-    return;
-  }
-
-  const creds: PlainCredentials = res.data.credentials;
-  let nowMs = opts.nowMs ?? Date.now();
-  let win = getTotpWindowInfo(nowMs, creds.period);
-
-  if (settings.autoSubmit && win.secondsRemaining < 3 && opts.nowMs === undefined) {
-    renderStatusPill(
-      doc,
-      settings.language,
-      t(settings.language, 'idpBadgeWaitingFresh', { seconds: win.secondsRemaining }),
-      'info'
-    );
-    await new Promise((r) => setTimeout(r, win.secondsRemaining * 1000 + 150));
-    nowMs = Date.now();
-    win = getTotpWindowInfo(nowMs, creds.period);
-  }
-
-  const totp = await generateTotp({
-    secret: creds.totpSecret,
-    timestampMs: nowMs,
-    digits: creds.digits,
-    period: creds.period,
-    algorithm: creds.algorithm
-  });
-
-  fillIdpForm(doc, creds.id9, formatCombinedOtp(creds.pin4, totp));
-
-  const authStateKey = extractAuthStateKey(doc.location?.href ?? '');
-  const guard = opts.forceRetry ? resetAutoSubmitGuard() : await getLoginGuard();
-  const verdict = evaluateAutoSubmitGuard({
-    guard,
-    hasPageError: opts.forceRetry ? false : hasIdpPageError(doc),
-    authStateKey,
-    nowMs
-  });
-
-  if (!settings.autoSubmit) {
-    renderStatusPill(
-      doc,
-      settings.language,
-      t(settings.language, 'idpBadgeFilled', { seconds: win.secondsRemaining }),
-      'info'
-    );
-    return;
-  }
-
-  if (!verdict.allowed) {
-    renderStatusPill(doc, settings.language, t(settings.language, 'idpBadgePaused'), 'warn', {
-      label: t(settings.language, 'idpRetryBtn'),
-      onClick: () => {
-        void runIdpAutoLogin(doc, { forceRetry: true, recaptchaWaitMs: opts.recaptchaWaitMs });
-      }
+    const res = await safeSendMessage<CredentialAvailability>({
+      type: 'GET_CREDENTIALS_STATUS'
     });
-    return;
+
+    if (!res?.ok) return;
+
+    if (res.data.status === 'unconfigured') {
+      renderStatusPill(doc, settings.language, t(settings.language, 'idpBadgeUnconfigured'), 'muted', {
+        label: t(settings.language, 'idpOpenSetupBtn'),
+        onClick: () => {
+          void safeSendMessage({ type: 'OPEN_OPTIONS' });
+        }
+      });
+      return;
+    }
+
+    if (res.data.status === 'locked') {
+      renderStatusPill(doc, settings.language, t(settings.language, 'idpBadgeLocked'), 'warn');
+      return;
+    }
+
+    const creds: PlainCredentials = res.data.credentials;
+    let nowMs = opts.nowMs ?? Date.now();
+    let win = getTotpWindowInfo(nowMs, creds.period);
+
+    if (settings.autoSubmit && win.secondsRemaining < 3 && opts.nowMs === undefined) {
+      renderStatusPill(
+        doc,
+        settings.language,
+        t(settings.language, 'idpBadgeWaitingFresh', { seconds: win.secondsRemaining }),
+        'info'
+      );
+      await new Promise((r) => setTimeout(r, win.secondsRemaining * 1000 + 150));
+      nowMs = Date.now();
+      win = getTotpWindowInfo(nowMs, creds.period);
+    }
+
+    const totp = await generateTotp({
+      secret: creds.totpSecret,
+      timestampMs: nowMs,
+      digits: creds.digits,
+      period: creds.period,
+      algorithm: creds.algorithm
+    });
+
+    fillIdpForm(doc, creds.id9, formatCombinedOtp(creds.pin4, totp));
+
+    const authStateKey = extractAuthStateKey(doc.location?.href ?? '');
+    const guard = opts.forceRetry ? resetAutoSubmitGuard() : await getLoginGuard();
+    const verdict = evaluateAutoSubmitGuard({
+      guard,
+      hasPageError: opts.forceRetry ? false : hasIdpPageError(doc),
+      authStateKey,
+      nowMs
+    });
+
+    if (!settings.autoSubmit) {
+      renderStatusPill(
+        doc,
+        settings.language,
+        t(settings.language, 'idpBadgeFilled', { seconds: win.secondsRemaining }),
+        'info'
+      );
+      return;
+    }
+
+    if (!verdict.allowed) {
+      renderStatusPill(doc, settings.language, t(settings.language, 'idpBadgePaused'), 'warn', {
+        label: t(settings.language, 'idpRetryBtn'),
+        onClick: (btn) => {
+          btn.disabled = true;
+          void runIdpAutoLogin(doc, {
+            forceRetry: true,
+            recaptchaWaitMs: opts.recaptchaWaitMs
+          }).finally(() => {
+            if (btn.isConnected) btn.disabled = false;
+          });
+        }
+      });
+      return;
+    }
+
+    await setLoginGuard(recordAutoSubmitAttempt(guard, authStateKey, nowMs));
+    renderStatusPill(doc, settings.language, t(settings.language, 'idpBadgeSubmitting'), 'info');
+
+    const submitBtn = await waitForSubmitButtonReady(doc, opts.recaptchaWaitMs ?? 1500);
+    if (!submitBtn) {
+      const remaining =
+        opts.nowMs === undefined
+          ? getTotpWindowInfo(Date.now(), creds.period).secondsRemaining
+          : win.secondsRemaining;
+      renderStatusPill(
+        doc,
+        settings.language,
+        t(settings.language, 'idpBadgeFilled', { seconds: remaining }),
+        'info'
+      );
+      return;
+    }
+    submitBtn.click();
+  } catch {
+    // Ignore transient worker teardown or storage errors in content script
+  } finally {
+    inFlight = false;
   }
-
-  await setLoginGuard(recordAutoSubmitAttempt(guard, authStateKey, nowMs));
-  renderStatusPill(doc, settings.language, t(settings.language, 'idpBadgeSubmitting'), 'info');
-
-  const submitBtn = await waitForSubmitButtonReady(doc, opts.recaptchaWaitMs ?? 1500);
-  submitBtn?.click();
 }

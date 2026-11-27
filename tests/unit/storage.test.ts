@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import QRCode from 'qrcode';
 import { decodeQrFromImageData } from '../../src/shared/qr';
 import {
   clearAllData,
   DEFAULT_SETTINGS,
   getKeepAliveStates,
+  getLoginGuard,
   getSettings,
   updateKeepAliveSiteState,
   updateSettings
@@ -37,6 +38,12 @@ function makeMemoryStorage() {
 }
 
 describe('storage layer & local QR decoder', () => {
+  const originalChrome = (globalThis as { chrome?: unknown }).chrome;
+
+  afterEach(() => {
+    (globalThis as { chrome?: unknown }).chrome = originalChrome;
+  });
+
   beforeEach(() => {
     const local = makeMemoryStorage();
     const session = makeMemoryStorage();
@@ -92,5 +99,14 @@ describe('storage layer & local QR decoder', () => {
     }
 
     expect(decodeQrFromImageData(rgba, width, width)).toBe(uri);
+  });
+
+  it('returns a fresh LoginAttemptGuard copy from getLoginGuard so mutations do not leak', async () => {
+    const first = await getLoginGuard();
+    first.attempts.push({ timestamp: 999, authStateKey: 'leaked' });
+    first.pausedUntilErrorCleared = true;
+
+    const second = await getLoginGuard();
+    expect(second).toEqual({ attempts: [], pausedUntilErrorCleared: false });
   });
 });

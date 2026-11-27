@@ -3,24 +3,34 @@ import { getSettings } from '../shared/storage';
 import { extractGauthFromDocument, renderGauthBanner } from './gauth-capture-core';
 
 let scanned = false;
+let scanning = false;
+let observer: MutationObserver | undefined;
 
 async function tryScan(): Promise<void> {
-  if (scanned) return;
-  const captured = await extractGauthFromDocument(document);
-  if (!captured) return;
-  scanned = true;
-  const settings = await getSettings();
-  renderGauthBanner(document, settings.language, captured);
+  if (scanned || scanning) return;
+  scanning = true;
+  try {
+    const captured = await extractGauthFromDocument(document);
+    if (!captured) return;
+    scanned = true;
+    observer?.disconnect();
+    const settings = await getSettings();
+    renderGauthBanner(document, settings.language, captured);
+  } catch {
+    // Ignore transient scan or storage errors during teardown
+  } finally {
+    scanning = false;
+  }
 }
 
-void tryScan();
-
 if (document.body) {
-  const observer = new MutationObserver(() => {
+  observer = new MutationObserver(() => {
     void tryScan();
   });
   observer.observe(document.body, { childList: true, subtree: true });
 }
+
+void tryScan();
 
 ext.runtime.onMessage.addListener((msg: { type?: string }, _sender, sendResponse) => {
   if (msg?.type === 'EXTRACT_GAUTH_FROM_PAGE') {

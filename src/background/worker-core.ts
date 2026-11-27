@@ -27,6 +27,10 @@ import {
 
 export const KEEPALIVE_ALARM_NAME = 'huji-moodle-keepalive';
 
+function formatErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message || err.name || fallback : fallback;
+}
+
 export async function syncKeepAliveAlarm(): Promise<void> {
   const settings = await getSettings();
   if (!settings.keepAliveMoodle && !settings.keepAliveCsMoodle) {
@@ -69,10 +73,12 @@ export async function pingMoodleSite(
         }
       );
 
+      let rawText = '';
       let jsonPayload: unknown;
       if (ajaxRes.status >= 200 && ajaxRes.status < 300) {
+        rawText = await ajaxRes.text();
         try {
-          jsonPayload = await ajaxRes.json();
+          jsonPayload = JSON.parse(rawText);
         } catch {
           jsonPayload = undefined;
         }
@@ -82,7 +88,9 @@ export async function pingMoodleSite(
         type: ajaxRes.type,
         redirected: ajaxRes.redirected,
         url: ajaxRes.url,
-        jsonPayload
+        bodyText: rawText,
+        jsonPayload,
+        expectJson: true
       });
 
       if (verdict.outcome === 'ok') {
@@ -146,7 +154,7 @@ export async function pingMoodleSite(
   } catch (err) {
     const next = await updateKeepAliveSiteState(site, {
       status: 'error',
-      lastError: err instanceof Error ? err.message : 'network_error'
+      lastError: formatErrorMessage(err, 'network_error')
     });
     return next[site];
   }
@@ -154,7 +162,8 @@ export async function pingMoodleSite(
 
 export async function runKeepAliveTick(
   targetSite?: SiteKey,
-  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis)
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  force = Boolean(targetSite)
 ): Promise<KeepAliveStates> {
   const settings = await getSettings();
   const states = await getKeepAliveStates();
@@ -166,7 +175,7 @@ export async function runKeepAliveTick(
     const enabled = site === 'moodle' ? settings.keepAliveMoodle : settings.keepAliveCsMoodle;
     if (!enabled) continue;
     // Skip background pings once logged out unless explicitly triggered by user
-    if (!targetSite && states[site].status === 'logged_out') continue;
+    if (!force && states[site].status === 'logged_out') continue;
     await pingMoodleSite(site, fetchImpl);
   }
   return getKeepAliveStates();
@@ -210,13 +219,14 @@ export async function handleRuntimeMessage(msg: RuntimeMessage): Promise<Runtime
         } else {
           await updateKeepAliveSiteState(site, {
             status: 'logged_out',
-            sesskey: undefined
+            sesskey: undefined,
+            lastError: undefined
           });
         }
         return { ok: true, data: true };
       }
       case 'PING_KEEPALIVE_NOW': {
-        const states = await runKeepAliveTick(msg.site);
+        const states = await runKeepAliveTick(msg.site, undefined, true);
         return { ok: true, data: states };
       }
       case 'CAPTURE_OPEN_GAUTH': {
@@ -225,7 +235,10 @@ export async function handleRuntimeMessage(msg: RuntimeMessage): Promise<Runtime
         if (!tab?.id) return { ok: false, error: 'no_gauth_tab' };
         const result = (await ext.tabs.sendMessage(tab.id, {
           type: 'EXTRACT_GAUTH_FROM_PAGE'
-        })) as RuntimeResponse;
+        })) as RuntimeResponse | undefined;
+        if (!result || typeof result !== 'object' || typeof (result as RuntimeResponse).ok !== 'boolean') {
+          return { ok: false, error: 'no_qr_found' };
+        }
         return result;
       }
       case 'RESET_LOGIN_GUARD': {
@@ -236,10 +249,14 @@ export async function handleRuntimeMessage(msg: RuntimeMessage): Promise<Runtime
         await syncKeepAliveAlarm();
         return { ok: true, data: true };
       }
+      case 'OPEN_OPTIONS': {
+        await ext.runtime.openOptionsPage();
+        return { ok: true, data: true };
+      }
       default:
         return { ok: false, error: 'unknown_message' };
     }
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'internal_error' };
+    return { ok: false, error: formatErrorMessage(err, 'internal_error') };
   }
 }

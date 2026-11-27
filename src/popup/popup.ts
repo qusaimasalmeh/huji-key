@@ -7,11 +7,9 @@ import type {
   KeepAliveSiteState,
   Language,
   PendingGauthImport,
-  PlainCredentials,
-  RuntimeMessage,
-  RuntimeResponse
+  PlainCredentials
 } from '../core/types';
-import { ext } from '../shared/browser';
+import { ext, safeSendMessage } from '../shared/browser';
 import {
   DEFAULT_SETTINGS,
   getKeepAliveStates,
@@ -24,17 +22,10 @@ let activeCreds: PlainCredentials | null = null;
 let currentSettings: ExtensionSettings = DEFAULT_SETTINGS;
 let lastRenderedCode = '';
 let tickTimer: ReturnType<typeof setInterval> | undefined;
+const copyTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function el<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
-}
-
-async function safeSendMessage<T>(msg: RuntimeMessage): Promise<RuntimeResponse<T> | undefined> {
-  try {
-    return (await ext.runtime.sendMessage(msg)) as RuntimeResponse<T> | undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function applyTranslations(lang: Language): void {
@@ -82,14 +73,16 @@ function renderSiteStatus(targetId: string, state: KeepAliveSiteState): void {
 }
 
 async function updateLiveOtp(): Promise<void> {
-  if (!activeCreds) return;
-  const info = getTotpWindowInfo(Date.now(), activeCreds.period);
+  const creds = activeCreds;
+  if (!creds) return;
+  const info = getTotpWindowInfo(Date.now(), creds.period);
   const code = await generateTotp({
-    secret: activeCreds.totpSecret,
-    digits: activeCreds.digits,
-    period: activeCreds.period,
-    algorithm: activeCreds.algorithm
+    secret: creds.totpSecret,
+    digits: creds.digits,
+    period: creds.period,
+    algorithm: creds.algorithm
   });
+  if (activeCreds !== creds) return;
   const codeEl = document.getElementById('live-otp-code');
   const secEl = document.getElementById('ring-seconds');
   const ringEl = document.getElementById('ring-progress');
@@ -120,6 +113,8 @@ function showAvailability(avail: CredentialAvailability): void {
     tickTimer = setInterval(() => void updateLiveOtp(), 500);
   } else {
     activeCreds = null;
+    lastRenderedCode = '';
+    el('live-otp-code').textContent = '------';
   }
 }
 
@@ -152,13 +147,21 @@ async function refreshAll(): Promise<void> {
 
 async function copyWithFeedback(btnId: string, text: string): Promise<void> {
   if (!text) return;
-  await navigator.clipboard.writeText(text);
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    return;
+  }
   const btn = el<HTMLButtonElement>(btnId);
   const key = btn.dataset.i18n as MessageKey;
+  const activeTimer = copyTimers.get(btnId);
+  if (activeTimer) clearTimeout(activeTimer);
   btn.textContent = t(currentLang, 'copied');
-  setTimeout(() => {
+  const timer = setTimeout(() => {
+    copyTimers.delete(btnId);
     btn.textContent = t(currentLang, key);
   }, 1200);
+  copyTimers.set(btnId, timer);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -214,11 +217,13 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   el('btn-lock-now').addEventListener('click', async () => {
-    await ext.runtime.sendMessage({ type: 'LOCK_CREDENTIALS' });
+    await safeSendMessage({ type: 'LOCK_CREDENTIALS' });
     await refreshAll();
   });
 
-  el('btn-copy-6').addEventListener('click', () => copyWithFeedback('btn-copy-6', lastRenderedCode));
+  el('btn-copy-6').addEventListener('click', () =>
+    void copyWithFeedback('btn-copy-6', lastRenderedCode)
+  );
   el('btn-copy-full').addEventListener('click', () => {
     if (!activeCreds || !lastRenderedCode) return;
     void copyWithFeedback('btn-copy-full', formatCombinedOtp(activeCreds.pin4, lastRenderedCode));
@@ -233,7 +238,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const target = e.currentTarget as HTMLInputElement;
       target.setAttribute('aria-checked', target.checked ? 'true' : 'false');
       await updateSettings({ [key]: target.checked });
-      if (updateAlarm) await ext.runtime.sendMessage({ type: 'UPDATE_KEEPALIVE_ALARM' });
+      if (updateAlarm) await safeSendMessage({ type: 'UPDATE_KEEPALIVE_ALARM' });
     });
   };
 
@@ -243,7 +248,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindSwitch('toggle-ka-cs', 'keepAliveCsMoodle', true);
 
   el('btn-ping-now').addEventListener('click', async () => {
-    await ext.runtime.sendMessage({ type: 'PING_KEEPALIVE_NOW' });
+    await safeSendMessage({ type: 'PING_KEEPALIVE_NOW' });
     await refreshAll();
   });
 
@@ -256,6 +261,9 @@ document.addEventListener('DOMContentLoaded', () => {
       clearInterval(tickTimer);
       tickTimer = undefined;
     }
+    for (const timer of copyTimers.values()) clearTimeout(timer);
+    copyTimers.clear();
     activeCreds = null;
+    lastRenderedCode = '';
   });
 });

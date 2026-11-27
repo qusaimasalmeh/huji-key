@@ -80,7 +80,8 @@ export type RuntimeMessage =
   | { type: 'CAPTURE_OPEN_GAUTH' }
   | { type: 'EXTRACT_GAUTH_FROM_PAGE' }
   | { type: 'RESET_LOGIN_GUARD' }
-  | { type: 'UPDATE_KEEPALIVE_ALARM' };
+  | { type: 'UPDATE_KEEPALIVE_ALARM' }
+  | { type: 'OPEN_OPTIONS' };
 
 export type RuntimeResponse<T = unknown> =
   | { ok: true; data: T }

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runIdpAutoLogin } from '../../src/content/idp-login-core';
 import { generateTotp } from '../../src/core/totp';
 
@@ -31,10 +31,20 @@ function makeMemoryStorage() {
 }
 
 describe('HUJI IdP auto-login DOM integration', () => {
+  const originalChrome = (globalThis as { chrome?: unknown }).chrome;
+  const originalDocument = globalThis.document;
   let sendMessageMock: ReturnType<typeof vi.fn>;
   let localStorageMock: ReturnType<typeof makeMemoryStorage>;
 
+  afterEach(() => {
+    vi.useRealTimers();
+    (globalThis as { chrome?: unknown }).chrome = originalChrome;
+    globalThis.document = originalDocument;
+  });
+
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(1_700_000_010_000);
     localStorageMock = makeMemoryStorage();
     const session = makeMemoryStorage();
     sendMessageMock = vi.fn(async () => ({
@@ -211,5 +221,98 @@ describe('HUJI IdP auto-login DOM integration', () => {
     } finally {
       globalThis.document = origDocument;
     }
+  });
+
+  it('renders Setup button on unconfigured pill that sends OPEN_OPTIONS and survives messaging/storage rejections', async () => {
+    const dom = new JSDOM(FIXTURE, {
+      url: 'https://idp.cc.huji.ac.il/simplesaml/module.php/hujicc/login?AuthState=_setup1%3Afoo'
+    });
+    const doc = dom.window.document;
+
+    sendMessageMock.mockResolvedValueOnce({ ok: true, data: { status: 'unconfigured' } });
+    await runIdpAutoLogin(doc, { recaptchaWaitMs: 0 });
+
+    const pill = doc.getElementById('huji-key-pill');
+    const setupBtn = pill?.querySelector('button');
+    expect(setupBtn?.textContent).toBe('Set up');
+
+    sendMessageMock.mockRejectedValueOnce(new Error('worker restarting'));
+    setupBtn?.click();
+    await vi.waitFor(() => {
+      expect(sendMessageMock).toHaveBeenLastCalledWith({ type: 'OPEN_OPTIONS' });
+    });
+
+    // Messaging rejection on GET_CREDENTIALS_STATUS resolves cleanly
+    sendMessageMock.mockRejectedValueOnce(new Error('Extension context invalidated'));
+    await expect(runIdpAutoLogin(doc, { recaptchaWaitMs: 0 })).resolves.toBeUndefined();
+
+    // Storage rejection resolves cleanly
+    localStorageMock.get = async () => {
+      throw new Error('storage offline');
+    };
+    await expect(runIdpAutoLogin(doc, { recaptchaWaitMs: 0 })).resolves.toBeUndefined();
+  });
+
+  it('guards concurrent runIdpAutoLogin calls, disables Retry button on click, and updates pill when submit stays disabled', async () => {
+    const dom = new JSDOM(FIXTURE, {
+      url: 'https://idp.cc.huji.ac.il/simplesaml/module.php/hujicc/login?AuthState=_race1%3Afoo'
+    });
+    const doc = dom.window.document;
+
+    let resolveMsg!: (v: unknown) => void;
+    sendMessageMock.mockImplementationOnce(
+      () =>
+        new Promise((r) => {
+          resolveMsg = r;
+        })
+    );
+
+    const p1 = runIdpAutoLogin(doc, { nowMs: 1_700_000_010_000, recaptchaWaitMs: 0 });
+    const p2 = runIdpAutoLogin(doc, { nowMs: 1_700_000_010_000, recaptchaWaitMs: 0 });
+    await vi.waitFor(() => {
+      expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+
+    resolveMsg({ ok: true, data: { status: 'locked' } });
+    await Promise.all([p1, p2]);
+
+    // When submit button stays disabled (e.g. unresolved reCAPTCHA), pill should not stay stuck on Submitting
+    const submitBtn = doc.getElementById('hujicc-captcha-btn-otp') as HTMLButtonElement;
+    submitBtn.disabled = true;
+    await runIdpAutoLogin(doc, { nowMs: 1_700_000_010_000, recaptchaWaitMs: 0 });
+    expect(doc.getElementById('huji-key-pill')?.textContent).toMatch(/Filled ID \+ OTP/i);
+
+    // Paused pill Retry button becomes disabled when clicked while runIdpAutoLogin is in flight
+    const errBox = doc.createElement('div');
+    errBox.className = 'alert alert-danger';
+    errBox.textContent = 'Invalid credentials';
+    doc.getElementById('hujicc-form-otp')?.prepend(errBox);
+
+    await runIdpAutoLogin(doc, { nowMs: 1_700_000_010_000, recaptchaWaitMs: 0 });
+    const retryBtn = doc.getElementById('huji-key-pill')?.querySelector('button') as HTMLButtonElement;
+    expect(retryBtn).not.toBeNull();
+
+    let resolveRetryMsg!: (v: unknown) => void;
+    sendMessageMock.mockImplementationOnce(
+      () =>
+        new Promise((r) => {
+          resolveRetryMsg = r;
+        })
+    );
+    retryBtn.click();
+    expect(retryBtn.disabled).toBe(true);
+    retryBtn.click();
+    await vi.waitFor(() => {
+      expect(sendMessageMock).toHaveBeenCalledTimes(4);
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(sendMessageMock).toHaveBeenCalledTimes(4);
+
+    resolveRetryMsg({ ok: true, data: { status: 'locked' } });
+    await vi.waitFor(() => {
+      expect(doc.getElementById('huji-key-pill')?.textContent).toMatch(/Locked/i);
+    });
   });
 });

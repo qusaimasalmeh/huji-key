@@ -6,11 +6,10 @@ import type {
   Language,
   PendingGauthImport,
   PlainCredentials,
-  RuntimeResponse,
   TotpAlgorithm
 } from '../core/types';
 import { validateIsraeliId, validatePin4, validateSecret } from '../core/validation';
-import { ext } from '../shared/browser';
+import { safeSendMessage } from '../shared/browser';
 import { decodeQrFromBlob } from '../shared/qr';
 import {
   clearAllData,
@@ -60,7 +59,8 @@ async function updatePreview(): Promise<void> {
   const codeEl = document.getElementById('preview-code');
   const timerEl = document.getElementById('preview-timer');
   if (!secretInput || !codeEl || !timerEl) return;
-  const secretCheck = validateSecret(secretInput.value);
+  const rawSecret = secretInput.value;
+  const secretCheck = validateSecret(rawSecret);
   if (!secretCheck.valid) {
     codeEl.textContent = '------';
     timerEl.textContent = '';
@@ -73,9 +73,13 @@ async function updatePreview(): Promise<void> {
     period: parsedMeta.period,
     algorithm: parsedMeta.algorithm
   });
-  if (!document.getElementById('preview-code')) return;
-  codeEl.textContent = `${code.slice(0, 3)} ${code.slice(3)}`;
-  timerEl.textContent = t(currentLang, 'secondsLeft', { seconds: info.secondsRemaining });
+  const currentSecret = document.getElementById('input-secret') as HTMLInputElement | null;
+  const currentCodeEl = document.getElementById('preview-code');
+  const currentTimerEl = document.getElementById('preview-timer');
+  if (!currentSecret || !currentCodeEl || !currentTimerEl) return;
+  if (currentSecret.value !== rawSecret) return;
+  currentCodeEl.textContent = `${code.slice(0, 3)} ${code.slice(3)}`;
+  currentTimerEl.textContent = t(currentLang, 'secondsLeft', { seconds: info.secondsRemaining });
 }
 
 function applyImportedCandidate(
@@ -223,14 +227,9 @@ document.addEventListener('DOMContentLoaded', () => {
   el('btn-scan-gauth').addEventListener('click', async () => {
     const msg = el('gauth-scan-msg');
     msg.textContent = '';
-    let res: RuntimeResponse<PendingGauthImport> | undefined;
-    try {
-      res = (await ext.runtime.sendMessage({
-        type: 'CAPTURE_OPEN_GAUTH'
-      })) as RuntimeResponse<PendingGauthImport> | undefined;
-    } catch {
-      res = undefined;
-    }
+    const res = await safeSendMessage<PendingGauthImport>({
+      type: 'CAPTURE_OPEN_GAUTH'
+    });
     if (!res?.ok) {
       msg.textContent =
         res?.error === 'no_gauth_tab'
@@ -243,9 +242,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const fileInput = el<HTMLInputElement>('qr-file-input');
   el('btn-qr-file').addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', () => {
+  fileInput.addEventListener('change', async () => {
     const file = fileInput.files?.[0];
-    if (file) void handleQrBlob(file, syncField);
+    if (!file) return;
+    try {
+      await handleQrBlob(file, syncField);
+    } finally {
+      (el('qr-file-input') as HTMLInputElement).value = '';
+    }
   });
 
   const dropzone = el('qr-dropzone');
@@ -399,19 +403,21 @@ document.addEventListener('DOMContentLoaded', () => {
   el<HTMLSelectElement>('select-interval').addEventListener('change', async (e) => {
     const val = Number((e.currentTarget as HTMLSelectElement).value) as 10 | 15 | 20;
     await updateSettings({ keepAliveIntervalMin: val });
-    await ext.runtime.sendMessage({ type: 'UPDATE_KEEPALIVE_ALARM' });
+    await safeSendMessage({ type: 'UPDATE_KEEPALIVE_ALARM' });
   });
 
   el<HTMLInputElement>('opt-ka-cs').addEventListener('change', async (e) => {
     const sw = e.currentTarget as HTMLInputElement;
     sw.setAttribute('aria-checked', sw.checked ? 'true' : 'false');
     await updateSettings({ keepAliveCsMoodle: sw.checked });
-    await ext.runtime.sendMessage({ type: 'UPDATE_KEEPALIVE_ALARM' });
+    await safeSendMessage({ type: 'UPDATE_KEEPALIVE_ALARM' });
   });
 
   el('btn-reset-guard').addEventListener('click', async () => {
-    await ext.runtime.sendMessage({ type: 'RESET_LOGIN_GUARD' });
-    el('safety-msg').textContent = t(currentLang, 'guardResetDone');
+    const res = await safeSendMessage({ type: 'RESET_LOGIN_GUARD' });
+    if (res?.ok) {
+      el('safety-msg').textContent = t(currentLang, 'guardResetDone');
+    }
   });
 
   const wipeDialog = el<HTMLDialogElement>('wipe-dialog');

@@ -30,6 +30,7 @@ export function classifyKeepAliveResult(input: {
   url?: string;
   bodyText?: string;
   jsonPayload?: unknown;
+  expectJson?: boolean;
 }): { outcome: 'ok' | 'logged_out' | 'retry_get' | 'error'; sesskey?: string; reason?: string } {
   if (input.type === 'opaqueredirect' || (input.status >= 300 && input.status < 400)) {
     return { outcome: 'logged_out', reason: 'redirected' };
@@ -64,6 +65,9 @@ export function classifyKeepAliveResult(input: {
     const body = input.bodyText ?? '';
     if (body.includes('id="login"') || body.includes('idp.cc.huji.ac.il/simplesaml')) {
       return { outcome: 'logged_out', reason: 'login_markup' };
+    }
+    if (input.expectJson) {
+      return { outcome: 'retry_get', reason: 'invalid_json' };
     }
     const sesskey = extractSesskeyFromHtml(body);
     return { outcome: 'ok', sesskey };

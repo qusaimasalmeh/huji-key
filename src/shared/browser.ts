@@ -1,3 +1,5 @@
+import type { RuntimeMessage, RuntimeResponse } from '../core/types';
+
 type BrowserGlobal = typeof chrome;
 
 function getApi(): BrowserGlobal {
@@ -21,3 +23,14 @@ export const ext = {
     return getApi().tabs;
   }
 };
+
+/** Sends a runtime message and returns undefined if the extension worker is unreachable. */
+export async function safeSendMessage<T = unknown>(
+  msg: RuntimeMessage
+): Promise<RuntimeResponse<T> | undefined> {
+  try {
+    return (await ext.runtime.sendMessage(msg)) as RuntimeResponse<T> | undefined;
+  } catch {
+    return undefined;
+  }
+}
