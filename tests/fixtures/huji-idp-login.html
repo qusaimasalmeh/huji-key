@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head><meta charset="utf-8"><title>Login</title></head>
+<body id="hujicc:login">
+  <div class="container hujicc-content">
+    <ul class="nav nav-pills mb-3 ltr" id="hujicc-tabs" role="tablist">
+      <li class="nav-item">
+        <a class="nav-link" id="hujicc-sms-tab" data-toggle="pill" href="#hujicc-sms" role="tab" aria-selected="false">With temporary code</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link active show" id="hujicc-otp-tab" data-toggle="pill" href="#hujicc-otp" role="tab" aria-selected="true">With OTP</a>
+      </li>
+    </ul>
+    <div class="tab-content" id="hujicc-tabContent">
+      <div class="tab-pane fade" id="hujicc-sms" role="tabpanel">
+        <form name="f-sms-request" id="hujicc-form-sms-request" method="post">
+          <input type="text" id="hujicc-tz9" name="tz9" />
+        </form>
+      </div>
+      <div class="tab-pane fade active show" id="hujicc-otp" role="tabpanel">
+        <form name="f-otp" id="hujicc-form-otp" method="post" action="https://idp.cc.huji.ac.il/simplesaml/module.php/hujicc/login?AuthState=_abc123%3Ahttps%3A%2F%2Fidp.cc.huji.ac.il">
+          <input type="hidden" name="formAction" value="otp" />
+          <div class="form-group ltr">
+            <label for="hujicc-otp-username">ID number (9 digits)</label>
+            <input type="text" class="form-control frm-in" id="hujicc-otp-username" name="username" value="" pattern="[0-9]{9}" />
+          </div>
+          <div class="form-group ltr">
+            <label for="hujicc-otp-password">OTP password</label>
+            <input type="password" class="form-control frm-in" id="hujicc-otp-password" name="o_password" />
+          </div>
+          <button type="submit" id="hujicc-captcha-btn-otp" class="btn btn-primary hujicc-captcha-btn" data-callback-name="hujiccSubmit_otp">Enter</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

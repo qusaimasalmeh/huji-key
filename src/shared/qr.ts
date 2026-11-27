@@ -12,14 +12,15 @@ export function decodeQrFromImageData(
 function drawOnCanvas(
   source: CanvasImageSource,
   width: number,
-  height: number
+  height: number,
+  doc: Document = document
 ): string | null {
   if (width <= 0 || height <= 0) return null;
   const maxDim = 1024;
   const scale = Math.min(1, maxDim / Math.max(width, height));
   const w = Math.max(1, Math.round(width * scale));
   const h = Math.max(1, Math.round(height * scale));
-  const canvas = document.createElement('canvas');
+  const canvas = doc.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -62,21 +63,31 @@ export async function decodeQrFromBlob(blob: Blob): Promise<string | null> {
   }
 }
 
+function isCanvasElement(el: Element): el is HTMLCanvasElement {
+  const Ctor = el.ownerDocument?.defaultView?.HTMLCanvasElement ?? globalThis.HTMLCanvasElement;
+  return typeof Ctor !== 'undefined' && el instanceof Ctor;
+}
+
+function isImageElement(el: Element): el is HTMLImageElement {
+  const Ctor = el.ownerDocument?.defaultView?.HTMLImageElement ?? globalThis.HTMLImageElement;
+  return typeof Ctor !== 'undefined' && el instanceof Ctor;
+}
+
 export async function decodeQrFromElement(
   el: HTMLImageElement | HTMLCanvasElement | SVGSVGElement
 ): Promise<string | null> {
-  if (el instanceof HTMLCanvasElement) {
-    const ctx = el.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return null;
-    const imgData = ctx.getImageData(0, 0, el.width, el.height);
-    return decodeQrFromImageData(imgData.data, el.width, el.height);
+  if (isCanvasElement(el)) {
+    if (el.width <= 0 || el.height <= 0) return null;
+    return drawOnCanvas(el, el.width, el.height, el.ownerDocument);
   }
-  if (el instanceof HTMLImageElement) {
+  if (isImageElement(el)) {
     const w = el.naturalWidth || el.width;
     const h = el.naturalHeight || el.height;
-    return drawOnCanvas(el, w, h);
+    return drawOnCanvas(el, w, h, el.ownerDocument);
   }
-  const serialized = new XMLSerializer().serializeToString(el);
+  const SerializerCtor =
+    el.ownerDocument?.defaultView?.XMLSerializer ?? globalThis.XMLSerializer;
+  const serialized = new SerializerCtor().serializeToString(el);
   const svgBlob = new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' });
   return decodeQrFromBlob(svgBlob);
 }
