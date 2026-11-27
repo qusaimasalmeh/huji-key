@@ -71,6 +71,7 @@ describe('Popup & Options UI accessibility and RTL/LTR', () => {
   const originalWindow = globalThis.window;
   const originalChrome = (globalThis as { chrome?: unknown }).chrome;
   const originalNavigator = globalThis.navigator;
+  const originalPrompt = globalThis.prompt;
 
   afterEach(() => {
     vi.useRealTimers();
@@ -84,6 +85,7 @@ describe('Popup & Options UI accessibility and RTL/LTR', () => {
     globalThis.document = originalDocument;
     globalThis.window = originalWindow;
     (globalThis as { chrome?: unknown }).chrome = originalChrome;
+    globalThis.prompt = originalPrompt;
     Object.defineProperty(globalThis, 'navigator', {
       value: originalNavigator,
       configurable: true
@@ -207,6 +209,14 @@ describe('Popup & Options UI accessibility and RTL/LTR', () => {
     idInput.value = '123';
     syncField(idInput, false, true);
     expect(idInput.getAttribute('aria-invalid')).toBe('true');
+
+    // Form reset clears flagged state, aria-invalid, and error aria-describedby
+    const form = doc.getElementById('credentials-form') as HTMLFormElement;
+    form.reset();
+    expect(idInput.getAttribute('aria-invalid')).toBe('false');
+    expect(idInput.getAttribute('aria-describedby')).toBe('hint-id9');
+    idInput.dispatchEvent(new dom.window.Event('input'));
+    expect(idInput.getAttribute('aria-invalid')).toBe('false');
   });
 
   it('popup renders live OTP, switches trilingual UI, and copies 6-digit / PIN+OTP codes', async () => {
@@ -347,13 +357,151 @@ describe('Popup & Options UI accessibility and RTL/LTR', () => {
       expect(doc.getElementById('save-banner')?.hidden).toBe(false);
     });
 
-    // Open and confirm <dialog> wipe
+    // Open and confirm <dialog> wipe resets form and clears banners/error state
+    const resetSpy = vi.spyOn(form, 'reset');
+    idEl.value = '123';
+    form.dispatchEvent(new dom.window.Event('submit', { cancelable: true }));
+    expect(idEl.getAttribute('aria-invalid')).toBe('true');
+
     doc.getElementById('btn-open-wipe')?.click();
     expect(wipeDialog.showModal).toHaveBeenCalledTimes(1);
     doc.getElementById('btn-confirm-wipe')?.click();
     await vi.waitFor(() => {
       expect(localData.credentials).toBeUndefined();
       expect(wipeDialog.close).toHaveBeenCalledTimes(1);
+    });
+    expect(resetSpy).toHaveBeenCalledTimes(1);
+    expect(idEl.getAttribute('aria-invalid')).toBe('false');
+    expect(idEl.getAttribute('aria-describedby')).toBe('hint-id9');
+    expect(doc.getElementById('save-banner')?.hidden).toBe(true);
+    expect(doc.getElementById('import-banner')?.hidden).toBe(true);
+    expect(doc.getElementById('warn-id9')?.hidden).toBe(true);
+  });
+
+  it('options hides stale save-banner and shows inline save-error inside credentials form on cancelled or wrong Master Lock prompt', async () => {
+    const html = fs.readFileSync(path.resolve('src/options/options.html'), 'utf8');
+    const dom = new JSDOM(html, { url: 'https://extension.local/options.html' });
+    const doc = dom.window.document;
+
+    const { chromeMock } = createChromeMock();
+    globalThis.document = doc;
+    globalThis.window = dom.window as unknown as Window & typeof globalThis;
+    (globalThis as { chrome?: unknown }).chrome = chromeMock;
+
+    vi.resetModules();
+    await import('../../src/options/options');
+    doc.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
+
+    await vi.waitFor(() => {
+      expect(doc.getElementById('otpauth-uri')?.getAttribute('placeholder')).toContain('otpauth://');
+    });
+
+    const form = doc.getElementById('credentials-form') as HTMLFormElement;
+    const idEl = doc.getElementById('input-id9') as HTMLInputElement;
+    const pinEl = doc.getElementById('input-pin4') as HTMLInputElement;
+    const secretEl = doc.getElementById('input-secret') as HTMLInputElement;
+    idEl.value = '000000018';
+    pinEl.value = '4321';
+    secretEl.value = 'JBSWY3DPEHPK3PXP';
+
+    // Initial save succeeds and reveals #save-banner
+    form.dispatchEvent(new dom.window.Event('submit', { cancelable: true }));
+    await vi.waitFor(() => {
+      expect(doc.getElementById('save-banner')?.hidden).toBe(false);
+    });
+
+    // Enable Master Lock
+    (doc.getElementById('lock-pass-1') as HTMLInputElement).value = 'pass1234';
+    (doc.getElementById('lock-pass-2') as HTMLInputElement).value = 'pass1234';
+    doc.getElementById('btn-enable-lock')?.click();
+    await vi.waitFor(() => {
+      expect(doc.getElementById('lock-disable-box')?.hidden).toBe(false);
+    });
+    doc.getElementById('lock-msg')!.textContent = '';
+
+    // Cancelling prompt hides stale #save-banner and shows inline error inside #credentials-form
+    globalThis.prompt = vi.fn(() => null);
+    form.dispatchEvent(new dom.window.Event('submit', { cancelable: true }));
+    await vi.waitFor(() => {
+      const saveError = doc.getElementById('save-error');
+      expect(doc.getElementById('save-banner')?.hidden).toBe(true);
+      expect(saveError?.hidden).toBe(false);
+      expect(saveError?.textContent).toBeTruthy();
+      expect(form.contains(saveError)).toBe(true);
+    });
+
+    // Wrong passphrase hides #save-banner and displays localized error inside #credentials-form (not only lock-msg)
+    globalThis.prompt = vi.fn(() => 'wrong-pass');
+    form.dispatchEvent(new dom.window.Event('submit', { cancelable: true }));
+    await vi.waitFor(() => {
+      const saveError = doc.getElementById('save-error');
+      expect(doc.getElementById('save-banner')?.hidden).toBe(true);
+      expect(saveError?.hidden).toBe(false);
+      expect(saveError?.textContent).toContain('Incorrect passphrase');
+      expect(doc.getElementById('lock-msg')?.textContent).toBe('');
+    });
+  });
+
+  it('guards undefined runtime.sendMessage responses gracefully in popup and options', async () => {
+    // Popup with undefined responses on CAPTURE_OPEN_GAUTH and UNLOCK_CREDENTIALS
+    const popupHtml = fs.readFileSync(path.resolve('src/popup/popup.html'), 'utf8');
+    const popupDom = new JSDOM(popupHtml, { url: 'https://extension.local/popup.html' });
+    const popupDoc = popupDom.window.document;
+    const { chromeMock: popupChrome, sendMessage: popupSend } = createChromeMock();
+    popupSend.mockImplementation(async (msg: { type: string }) => {
+      if (msg.type === 'GET_CREDENTIALS_STATUS') {
+        return { ok: true, data: { status: 'unconfigured' } };
+      }
+      return undefined as never;
+    });
+
+    globalThis.document = popupDoc;
+    globalThis.window = popupDom.window as unknown as Window & typeof globalThis;
+    (globalThis as { chrome?: unknown }).chrome = popupChrome;
+
+    vi.resetModules();
+    await import('../../src/popup/popup');
+    popupDoc.dispatchEvent(new popupDom.window.Event('DOMContentLoaded'));
+    await vi.waitFor(() => {
+      expect(popupDoc.getElementById('view-unconfigured')?.hidden).toBe(false);
+    });
+
+    popupDoc.getElementById('btn-capture-gauth')?.click();
+    await vi.waitFor(() => {
+      expect(popupDoc.getElementById('gauth-feedback')?.textContent).toContain('No QR code');
+    });
+
+    (popupDoc.getElementById('unlock-passphrase') as HTMLInputElement).value = 'secret';
+    popupDoc.getElementById('unlock-form')?.dispatchEvent(new popupDom.window.Event('submit', { cancelable: true }));
+    await vi.waitFor(() => {
+      const unlockErr = popupDoc.getElementById('unlock-error');
+      expect(unlockErr?.hidden).toBe(false);
+      expect(unlockErr?.textContent).toContain('Incorrect passphrase');
+    });
+
+    popupDom.window.dispatchEvent(new popupDom.window.Event('pagehide'));
+
+    // Options with undefined response on CAPTURE_OPEN_GAUTH
+    const optHtml = fs.readFileSync(path.resolve('src/options/options.html'), 'utf8');
+    const optDom = new JSDOM(optHtml, { url: 'https://extension.local/options.html' });
+    const optDoc = optDom.window.document;
+    const { chromeMock: optChrome, sendMessage: optSend } = createChromeMock();
+    optSend.mockImplementation(async () => undefined as never);
+
+    globalThis.document = optDoc;
+    globalThis.window = optDom.window as unknown as Window & typeof globalThis;
+    (globalThis as { chrome?: unknown }).chrome = optChrome;
+
+    vi.resetModules();
+    await import('../../src/options/options');
+    optDoc.dispatchEvent(new optDom.window.Event('DOMContentLoaded'));
+    await vi.waitFor(() => {
+      expect(optDoc.getElementById('otpauth-uri')?.getAttribute('placeholder')).toContain('otpauth://');
+    });
+
+    optDoc.getElementById('btn-scan-gauth')?.click();
+    await vi.waitFor(() => {
+      expect(optDoc.getElementById('gauth-scan-msg')?.textContent).toContain('No QR code');
     });
   });
 });

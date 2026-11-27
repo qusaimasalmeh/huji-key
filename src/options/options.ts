@@ -223,12 +223,17 @@ document.addEventListener('DOMContentLoaded', () => {
   el('btn-scan-gauth').addEventListener('click', async () => {
     const msg = el('gauth-scan-msg');
     msg.textContent = '';
-    const res = (await ext.runtime.sendMessage({
-      type: 'CAPTURE_OPEN_GAUTH'
-    })) as RuntimeResponse<PendingGauthImport>;
-    if (!res.ok) {
+    let res: RuntimeResponse<PendingGauthImport> | undefined;
+    try {
+      res = (await ext.runtime.sendMessage({
+        type: 'CAPTURE_OPEN_GAUTH'
+      })) as RuntimeResponse<PendingGauthImport> | undefined;
+    } catch {
+      res = undefined;
+    }
+    if (!res?.ok) {
       msg.textContent =
-        res.error === 'no_gauth_tab'
+        res?.error === 'no_gauth_tab'
           ? t(currentLang, 'captureNoGauthTab')
           : t(currentLang, 'captureNoQrFound');
       return;
@@ -274,6 +279,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   el('credentials-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const saveBanner = el('save-banner');
+    const saveError = el('save-error');
+    saveBanner.hidden = true;
+    saveError.hidden = true;
+    saveError.textContent = '';
+
     const idEl = el<HTMLInputElement>('input-id9');
     const pinEl = el<HTMLInputElement>('input-pin4');
     const secretEl = el<HTMLInputElement>('input-secret');
@@ -309,14 +320,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const settings = await getSettings();
     if (settings.lockEnabled) {
       const currentPass = prompt(t(currentLang, 'passphraseLabel')) || '';
-      if (!currentPass) return;
+      if (!currentPass) {
+        saveError.textContent = t(currentLang, 'wrongPassphrase');
+        saveError.hidden = false;
+        announce(saveError.textContent);
+        return;
+      }
       const existing = await getStoredCredentials();
       if (existing && isEncryptedEnvelope(existing)) {
         try {
           await decryptCredentials(existing, currentPass);
         } catch {
-          el('lock-msg').textContent = t(currentLang, 'wrongPassphrase');
-          announce(t(currentLang, 'wrongPassphrase'));
+          saveError.textContent = t(currentLang, 'wrongPassphrase');
+          saveError.hidden = false;
+          announce(saveError.textContent);
           return;
         }
       }
@@ -326,10 +343,9 @@ document.addEventListener('DOMContentLoaded', () => {
       await setStoredCredentials(creds);
     }
 
-    const banner = el('save-banner');
-    banner.textContent = t(currentLang, 'savedBanner');
-    banner.hidden = false;
-    announce(t(currentLang, 'savedBanner'));
+    saveBanner.textContent = t(currentLang, 'savedBanner');
+    saveBanner.hidden = false;
+    announce(saveBanner.textContent);
   });
 
   el('btn-enable-lock').addEventListener('click', async () => {
@@ -407,13 +423,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const pinEl = el<HTMLInputElement>('input-pin4');
     const secretEl = el<HTMLInputElement>('input-secret');
     for (const input of [idEl, pinEl, secretEl]) {
-      input.value = '';
       input.setCustomValidity('');
-      input.setAttribute('aria-invalid', 'false');
     }
+    (el('credentials-form') as HTMLFormElement).reset();
     el('warn-id9').hidden = true;
     el('import-banner').hidden = true;
     el('save-banner').hidden = true;
+    const saveError = el('save-error');
+    saveError.hidden = true;
+    saveError.textContent = '';
     parsedMeta = { issuer: 'HUJI', digits: 6, period: 30, algorithm: 'SHA-1' };
     await updatePreview();
     wipeDialog.close();

@@ -368,6 +368,12 @@ html[dir="rtl"] .switch-input:checked::after {
   border: 1px solid #a7f3d0;
 }
 
+.banner.err {
+  background: #fef2f2;
+  color: var(--crimson);
+  border: 1px solid #fecaca;
+}
+
 .inline-msg {
   margin: 8px 0 0;
   font-size: 13px;

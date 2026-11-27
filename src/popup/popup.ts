@@ -8,6 +8,7 @@ import type {
   Language,
   PendingGauthImport,
   PlainCredentials,
+  RuntimeMessage,
   RuntimeResponse
 } from '../core/types';
 import { ext } from '../shared/browser';
@@ -26,6 +27,14 @@ let tickTimer: ReturnType<typeof setInterval> | undefined;
 
 function el<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
+}
+
+async function safeSendMessage<T>(msg: RuntimeMessage): Promise<RuntimeResponse<T> | undefined> {
+  try {
+    return (await ext.runtime.sendMessage(msg)) as RuntimeResponse<T> | undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function applyTranslations(lang: Language): void {
@@ -135,9 +144,9 @@ async function refreshAll(): Promise<void> {
   renderSiteStatus('status-moodle', states.moodle);
   renderSiteStatus('status-cs', states.csMoodle);
 
-  const statusRes = (await ext.runtime.sendMessage({
+  const statusRes = await safeSendMessage<CredentialAvailability>({
     type: 'GET_CREDENTIALS_STATUS'
-  })) as RuntimeResponse<CredentialAvailability> | undefined;
+  });
   if (statusRes?.ok) showAvailability(statusRes.data);
 }
 
@@ -169,17 +178,17 @@ document.addEventListener('DOMContentLoaded', () => {
   el('btn-capture-gauth').addEventListener('click', async () => {
     const feedback = el('gauth-feedback');
     feedback.textContent = '';
-    const res = (await ext.runtime.sendMessage({
+    const res = await safeSendMessage<PendingGauthImport>({
       type: 'CAPTURE_OPEN_GAUTH'
-    })) as RuntimeResponse<PendingGauthImport>;
-    if (!res.ok) {
+    });
+    if (!res?.ok) {
       feedback.textContent =
-        res.error === 'no_gauth_tab'
+        res?.error === 'no_gauth_tab'
           ? t(currentLang, 'captureNoGauthTab')
           : t(currentLang, 'captureNoQrFound');
       return;
     }
-    await ext.runtime.sendMessage({
+    await safeSendMessage({
       type: 'OPEN_SETUP_WITH_IMPORT',
       payload: res.data
     });
@@ -191,11 +200,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const pass = passInput.value;
     const errEl = el('unlock-error');
     errEl.hidden = true;
-    const res = (await ext.runtime.sendMessage({
+    const res = await safeSendMessage<CredentialAvailability>({
       type: 'UNLOCK_CREDENTIALS',
       passphrase: pass
-    })) as RuntimeResponse<CredentialAvailability>;
-    if (!res.ok) {
+    });
+    if (!res?.ok) {
       errEl.textContent = t(currentLang, 'wrongPassphrase');
       errEl.hidden = false;
       return;

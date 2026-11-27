@@ -140,5 +140,26 @@ export function initAccessibleValidation(root: Document): {
     });
   }
 
+  root.addEventListener(
+    'reset',
+    (e) => {
+      const form = e.target as HTMLFormElement | null;
+      if (!form?.elements) return;
+      for (const el of fields) {
+        if (el.form === form) {
+          flagged.delete(el);
+          el.setAttribute('aria-invalid', 'false');
+          linkError(el, false);
+        }
+      }
+      queueMicrotask(() => {
+        for (const el of fields) {
+          if (el.form === form) syncField(el, false);
+        }
+      });
+    },
+    true
+  );
+
   return { syncField, announce };
 }
