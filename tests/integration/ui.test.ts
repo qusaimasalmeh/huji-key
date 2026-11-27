@@ -721,4 +721,18 @@ describe('Popup & Options UI accessibility and RTL/LTR', () => {
       expect(valueSetterSpy).toHaveBeenCalledWith('');
     });
   });
+
+  it('includes tasteful Buy Me a Coffee links in popup and options with safe link attributes', () => {
+    for (const rel of ['src/popup/popup.html', 'src/options/options.html']) {
+      const html = fs.readFileSync(path.resolve(rel), 'utf8');
+      const dom = new JSDOM(html);
+      const link = dom.window.document.querySelector(
+        'a[href="https://buymeacoffee.com/qusaidev"]'
+      ) as HTMLAnchorElement | null;
+      expect(link).not.toBeNull();
+      expect(link?.getAttribute('target')).toBe('_blank');
+      expect(link?.getAttribute('rel')).toContain('noopener');
+      expect(link?.getAttribute('rel')).toContain('noreferrer');
+    }
+  });
 });

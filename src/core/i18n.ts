@@ -106,7 +106,10 @@ const en = {
   gauthBannerFound: 'HUJI Key detected your OTP QR code',
   gauthBannerPinHint: 'Detected PIN {pin4}',
   gauthBannerSaveBtn: 'Import to HUJI Key',
-  gauthBannerDismiss: 'Dismiss'
+  gauthBannerDismiss: 'Dismiss',
+  coffeeBtn: 'Buy me a coffee',
+  supportTitle: 'Free for HUJI students',
+  supportDesc: 'Saved you time logging into Moodle? A small coffee keeps updates flowing.'
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -217,7 +220,10 @@ const he: Record<MessageKey, string> = {
   gauthBannerFound: 'HUJI Key זיהה את קוד ה-QR שלך',
   gauthBannerPinHint: 'זוהה קוד {pin4}',
   gauthBannerSaveBtn: 'ייבא ל-HUJI Key',
-  gauthBannerDismiss: 'סגור'
+  gauthBannerDismiss: 'סגור',
+  coffeeBtn: 'הזמן אותי לקפה',
+  supportTitle: 'חינמי לסטודנטים ב-HUJI',
+  supportDesc: 'חסך לך זמן בכניסה למודל? קפה קטן עוזר להמשיך לתחזק ולעדכן.'
 };
 
 const ar: Record<MessageKey, string> = {
@@ -326,7 +332,10 @@ const ar: Record<MessageKey, string> = {
   gauthBannerFound: 'اكتشف HUJI Key رمز QR الخاص بك',
   gauthBannerPinHint: 'تم اكتشاف الرمز {pin4}',
   gauthBannerSaveBtn: 'استيراد إلى HUJI Key',
-  gauthBannerDismiss: 'إغلاق'
+  gauthBannerDismiss: 'إغلاق',
+  coffeeBtn: 'ادعمني بكوب قهوة',
+  supportTitle: 'مجاني لطلاب الجامعة',
+  supportDesc: 'وفّر عليك وقت الدخول إلى مودل؟ كوب قهوة صغير يساعد على استمرار التطوير.'
 };
 
 export const MESSAGES: Record<Language, Record<MessageKey, string>> = { en, he, ar };

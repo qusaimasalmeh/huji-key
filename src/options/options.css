@@ -409,3 +409,38 @@ dialog::backdrop {
   gap: 8px;
   margin-block-start: 16px;
 }
+
+.support-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  background: #fffdf7;
+  border-color: #fde68a;
+}
+
+.support-title {
+  margin: 0 0 2px;
+  font-size: 15px;
+}
+
+.btn-coffee {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid #fcd34d;
+  background: #fef3c7;
+  color: #78350f;
+  font: 600 13px/1.2 inherit;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+}
+
+.btn-coffee:hover {
+  background: #fde68a;
+}

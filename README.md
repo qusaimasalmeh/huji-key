@@ -22,3 +22,7 @@ npm run pack
 Outputs:
 - Chrome / Brave / Edge / Vivaldi unpacked folder: `dist/chrome/` (and `dist/huji-key-chrome-v1.0.0.zip`)
 - Firefox unpacked / AMO package: `dist/firefox/` (and `dist/huji-key-firefox-v1.0.0.zip`)
+
+## Support
+
+HUJI Key is completely free and local-only for all students. If it saved you time: [Buy me a coffee](https://buymeacoffee.com/qusaidev) ☕
