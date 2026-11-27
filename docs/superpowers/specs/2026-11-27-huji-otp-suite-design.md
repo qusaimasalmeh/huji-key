@@ -250,7 +250,7 @@ How it works without generating false logins or broken requests:
 * Stored in `src/core/i18n.ts` with a strict TypeScript type ensuring every string key exists across all three locales.
 * Layout uses CSS logical properties (`padding-inline`, `margin-inline`, `inset-inline-end`, `text-align: start`) so RTL flips seamlessly.
 * Numeric tokens (`id9`, `pin4`, 6-digit TOTP, `otpauth://`, HUJI URLs) always carry `dir="ltr"` and `unicode-bidi: isolate` inside RTL prose.
-* Quick language pill (`EN | עב | ער`) sits in the top bar of both popup and options pages for instant 1-click switching.
+* Quick language pill (`EN | עב | ع`) sits in the top bar of both popup and options pages for instant 1-click switching.
 
 ---
 
