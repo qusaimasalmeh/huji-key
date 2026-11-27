@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HUJI Key — Setup &amp; Settings</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <header class="page-head">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">HK</span>
+      <div>
+        <h1 data-i18n="optionsTitle">HUJI Key — Setup &amp; Settings</h1>
+        <p class="subtitle" data-i18n="unofficialNotice"></p>
+      </div>
+    </div>
+    <div class="lang-group" role="group" data-i18n-aria="langLabel">
+      <button type="button" class="lang-btn" data-lang="en" aria-pressed="true">EN</button>
+      <button type="button" class="lang-btn" data-lang="he" aria-pressed="false">עב</button>
+      <button type="button" class="lang-btn" data-lang="ar" aria-pressed="false">ع</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2 data-i18n="onboardingHeading">1. Connect Your HUJI OTP</h2>
+
+      <div class="tablist" role="tablist" data-i18n-aria="onboardingHeading">
+        <button type="button" role="tab" id="tab-gauth" data-panel="panel-gauth" aria-selected="true" tabindex="0" data-i18n="tabGauth">gauth.huji.ac.il</button>
+        <button type="button" role="tab" id="tab-qr" data-panel="panel-qr" aria-selected="false" tabindex="-1" data-i18n="tabQrImage">QR Image</button>
+        <button type="button" role="tab" id="tab-uri" data-panel="panel-uri" aria-selected="false" tabindex="-1" data-i18n="tabUri">otpauth:// Link</button>
+        <button type="button" role="tab" id="tab-manual" data-panel="panel-manual" aria-selected="false" tabindex="-1" data-i18n="tabManual">Manual Entry</button>
+      </div>
+
+      <div role="tabpanel" id="panel-gauth" aria-labelledby="tab-gauth" tabindex="0">
+        <div class="panel-inner">
+          <p class="hint" data-i18n="gauthStepInstructions"></p>
+          <button type="button" id="btn-scan-gauth" class="btn-secondary" data-i18n="scanOpenGauthTab">Scan Open gauth.huji.ac.il Tab</button>
+          <p id="gauth-scan-msg" class="inline-msg" role="status" aria-live="polite"></p>
+        </div>
+      </div>
+
+      <div role="tabpanel" id="panel-qr" aria-labelledby="tab-qr" hidden="until-found">
+        <div class="panel-inner">
+          <div id="qr-dropzone" class="dropzone" tabindex="0">
+            <p class="hint" data-i18n="qrDropLabel"></p>
+            <input id="qr-file-input" type="file" accept="image/*" class="visually-hidden" />
+            <button type="button" id="btn-qr-file" class="btn-secondary" data-i18n="qrSelectFile">Choose Image</button>
+          </div>
+          <p id="qr-scan-msg" class="inline-msg" role="status" aria-live="polite"></p>
+        </div>
+      </div>
+
+      <div role="tabpanel" id="panel-uri" aria-labelledby="tab-uri" hidden="until-found">
+        <div class="panel-inner">
+          <label for="otpauth-uri" class="field-label" data-i18n="uriInputLabel">Paste otpauth://totp/... Link</label>
+          <div class="inline-row">
+            <input id="otpauth-uri" type="text" class="ltr-isolate" autocorrect="off" autocapitalize="none" spellcheck="false" />
+            <button type="button" id="btn-parse-uri" class="btn-secondary" data-i18n="uriParseBtn">Load Link</button>
+          </div>
+          <p id="uri-msg" class="inline-msg" role="status" aria-live="polite"></p>
+        </div>
+      </div>
+
+      <div role="tabpanel" id="panel-manual" aria-labelledby="tab-manual" hidden="until-found">
+        <div class="panel-inner">
+          <p class="hint" data-i18n="secretInputHint"></p>
+        </div>
+      </div>
+
+      <form id="credentials-form" class="cred-form" novalidate>
+        <p id="import-banner" class="banner ok" role="status" hidden></p>
+
+        <div class="field">
+          <label for="input-id9" class="field-label" data-i18n="idInputLabel">HUJI ID Number (9 digits)</label>
+          <span id="hint-id9" class="hint" data-i18n="idInputHint"></span>
+          <input id="input-id9" name="id9" type="text" inputmode="numeric" maxlength="9" pattern="\d{9}" required class="ltr-isolate" autocomplete="username" autocorrect="off" autocapitalize="none" spellcheck="false" aria-describedby="hint-id9" data-error="err-id9" />
+          <span id="err-id9" class="error-msg" data-i18n="idInputError"></span>
+          <span id="warn-id9" class="warn-msg" hidden data-i18n="idCheckDigitWarn"></span>
+        </div>
+
+        <div class="field">
+          <label for="input-pin4" class="field-label" data-i18n="pinInputLabel">Fixed 4-Digit PIN</label>
+          <span id="hint-pin4" class="hint" data-i18n="pinInputHint"></span>
+          <input id="input-pin4" name="pin4" type="text" inputmode="numeric" maxlength="4" pattern="\d{4}" required class="ltr-isolate" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" aria-describedby="hint-pin4" data-error="err-pin4" />
+          <span id="err-pin4" class="error-msg" data-i18n="pinInputError"></span>
+        </div>
+
+        <div class="field">
+          <label for="input-secret" class="field-label" data-i18n="secretInputLabel">Base32 TOTP Secret</label>
+          <span id="hint-secret" class="hint" data-i18n="secretInputHint"></span>
+          <input id="input-secret" name="totpSecret" type="text" required class="ltr-isolate" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" aria-describedby="hint-secret" data-error="err-secret" />
+          <span id="err-secret" class="error-msg" data-i18n="secretInputError"></span>
+        </div>
+
+        <div class="preview-box">
+          <div>
+            <h3 class="preview-title" data-i18n="previewHeading">Live Verification Preview</h3>
+            <p class="hint" data-i18n="previewHint"></p>
+          </div>
+          <div class="preview-code-wrap">
+            <span id="preview-code" class="preview-digits ltr-isolate">------</span>
+            <span id="preview-timer" class="chip ltr-isolate"></span>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-primary" data-i18n="saveCredentialsBtn">Save Credentials Locally</button>
+        <p id="save-banner" class="banner ok" role="status" hidden></p>
+        <p id="save-error" class="banner err" role="alert" hidden></p>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="securityHeading">2. Privacy &amp; Master Lock</h2>
+      <p class="hint" data-i18n="privacySummary"></p>
+      <div id="lock-setup-box">
+        <div class="field">
+          <label for="lock-pass-1" class="field-label" data-i18n="newPassphraseLabel"></label>
+          <input id="lock-pass-1" type="password" minlength="4" autocomplete="new-password" />
+        </div>
+        <div class="field">
+          <label for="lock-pass-2" class="field-label" data-i18n="confirmPassphraseLabel"></label>
+          <input id="lock-pass-2" type="password" minlength="4" autocomplete="new-password" />
+        </div>
+        <button type="button" id="btn-enable-lock" class="btn-secondary" data-i18n="applyLockBtn">Enable Master Lock</button>
+      </div>
+      <div id="lock-disable-box" hidden>
+        <div class="field">
+          <label for="lock-pass-remove" class="field-label" data-i18n="disableLockPassphrasePrompt"></label>
+          <input id="lock-pass-remove" type="password" autocomplete="current-password" />
+        </div>
+        <button type="button" id="btn-disable-lock" class="btn-secondary" data-i18n="disableLockBtn">Disable Master Lock</button>
+      </div>
+      <p id="lock-msg" class="inline-msg" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="keepAliveSettingsHeading">3. Moodle Keep-Alive &amp; Safety</h2>
+      <div class="field">
+        <label for="select-interval" class="field-label" data-i18n="intervalLabel">Background refresh interval</label>
+        <select id="select-interval">
+          <option value="10" data-i18n="interval10"></option>
+          <option value="15" data-i18n="interval15"></option>
+          <option value="20" data-i18n="interval20"></option>
+        </select>
+      </div>
+      <label class="switch-row">
+        <span data-i18n="moodleCsLabel">CS Moodle (moodle2.cs.huji.ac.il)</span>
+        <input id="opt-ka-cs" class="switch-input" type="checkbox" role="switch" />
+      </label>
+      <div class="row-actions">
+        <button type="button" id="btn-reset-guard" class="btn-secondary" data-i18n="resetGuardBtn">Reset Auto-Submit Pause</button>
+      </div>
+      <p id="safety-msg" class="inline-msg" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="card danger-card">
+      <h2 data-i18n="dangerHeading">4. Local Data Control</h2>
+      <button type="button" id="btn-open-wipe" class="btn-danger" data-i18n="wipeDataBtn">Delete All Stored Data</button>
+      <p id="wipe-msg" class="inline-msg" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="card support-card">
+      <div>
+        <h2 class="support-title" data-i18n="supportTitle">Free for HUJI students</h2>
+        <p class="hint" data-i18n="supportDesc"></p>
+      </div>
+      <a class="btn-coffee" href="https://buymeacoffee.com/qusaidev" target="_blank" rel="noopener noreferrer">
+        <span aria-hidden="true">☕</span>
+        <span data-i18n="coffeeBtn">Buy me a coffee</span>
+      </a>
+    </section>
+  </main>
+
+  <dialog id="wipe-dialog" aria-labelledby="wipe-dialog-title">
+    <h2 id="wipe-dialog-title" data-i18n="wipeDialogTitle">Delete all HUJI Key data?</h2>
+    <p data-i18n="wipeDialogDesc"></p>
+    <div class="dialog-actions">
+      <button type="button" id="btn-cancel-wipe" class="btn-secondary" data-i18n="cancelBtn" autofocus>Cancel</button>
+      <button type="button" id="btn-confirm-wipe" class="btn-danger" data-i18n="confirmWipeBtn">Delete Everything</button>
+    </div>
+  </dialog>
+
+  <script src="options.js"></script>
+</body>
+</html>

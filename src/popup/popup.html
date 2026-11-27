@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HUJI Key</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">HK</span>
+      <div>
+        <h1 class="brand-title" data-i18n="appName">HUJI Key</h1>
+        <p class="brand-sub" data-i18n="appSubtitle">Local Auto-OTP &amp; Moodle Keep-Alive</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <div class="lang-group" role="group" data-i18n-aria="langLabel">
+        <button type="button" class="lang-btn" data-lang="en" aria-pressed="true">EN</button>
+        <button type="button" class="lang-btn" data-lang="he" aria-pressed="false">עב</button>
+        <button type="button" class="lang-btn" data-lang="ar" aria-pressed="false">ع</button>
+      </div>
+      <button type="button" id="open-options-btn" class="icon-btn" data-i18n-title="openSettings" data-i18n-aria="openSettings">⚙</button>
+    </div>
+  </header>
+
+  <main class="stack">
+    <section id="view-unconfigured" class="card empty-card" hidden>
+      <h2 class="card-title" data-i18n="setupRequiredTitle">Set up in 30 seconds</h2>
+      <p class="muted" data-i18n="setupRequiredDesc"></p>
+      <div class="btn-col">
+        <button type="button" id="btn-setup" class="btn-primary" data-i18n="openSetupBtn">Open Setup</button>
+        <button type="button" id="btn-capture-gauth" class="btn-secondary" data-i18n="captureGauthBtn">Capture from open gauth tab</button>
+      </div>
+      <p id="gauth-feedback" class="inline-feedback" role="status" aria-live="polite"></p>
+    </section>
+
+    <section id="view-locked" class="card" hidden>
+      <h2 class="card-title" data-i18n="lockedTitle">Credentials Locked</h2>
+      <p class="muted" data-i18n="lockedDesc"></p>
+      <form id="unlock-form" class="unlock-form">
+        <label for="unlock-passphrase" class="field-label" data-i18n="passphraseLabel">Master Passphrase</label>
+        <input id="unlock-passphrase" type="password" autocomplete="current-password" required />
+        <p id="unlock-error" class="error-text" role="alert" hidden></p>
+        <button type="submit" class="btn-primary" data-i18n="unlockBtn">Unlock</button>
+      </form>
+    </section>
+
+    <section id="view-otp" class="card otp-card" hidden>
+      <div class="otp-header">
+        <span class="section-label" data-i18n="liveOtpHeading">Current Code</span>
+        <div class="otp-meta">
+          <span id="meta-id" class="chip ltr-isolate"></span>
+          <span id="meta-pin" class="chip ltr-isolate"></span>
+          <button type="button" id="btn-lock-now" class="link-btn" data-i18n="lockNowBtn" hidden>Lock Now</button>
+        </div>
+      </div>
+      <div class="otp-row">
+        <div id="live-otp-code" class="otp-digits ltr-isolate">------</div>
+        <div class="ring-wrap" aria-hidden="true">
+          <svg class="ring" viewBox="0 0 36 36">
+            <circle class="ring-track" cx="18" cy="18" r="15" />
+            <circle id="ring-progress" class="ring-fill" cx="18" cy="18" r="15" stroke-dasharray="94.25" stroke-dashoffset="0" />
+          </svg>
+          <span id="ring-seconds" class="ring-text ltr-isolate">30s</span>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button type="button" id="btn-copy-6" class="btn-primary" data-i18n="copyOtp6">Copy 6-digit OTP</button>
+        <button type="button" id="btn-copy-full" class="btn-secondary" data-i18n="copyPinOtp">Copy PIN + OTP</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="section-label" data-i18n="controlsHeading">Login Automation</h2>
+      <label class="switch-row">
+        <span data-i18n="autoFillToggle">Auto-fill ID &amp; OTP</span>
+        <input id="toggle-autofill" class="switch-input" type="checkbox" role="switch" />
+      </label>
+      <label class="switch-row">
+        <span data-i18n="autoSubmitToggle">Safe auto-submit</span>
+        <input id="toggle-autosubmit" class="switch-input" type="checkbox" role="switch" />
+      </label>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h2 class="section-label" data-i18n="keepAliveHeading">Moodle Keep-Alive</h2>
+        <div class="mini-actions">
+          <button type="button" id="btn-ping-now" class="link-btn" data-i18n="pingNow">Refresh now</button>
+          <button type="button" id="btn-open-moodle" class="link-btn" data-i18n="openMoodle">Open Moodle</button>
+        </div>
+      </div>
+      <div class="site-block">
+        <label class="switch-row">
+          <span data-i18n="moodleMainLabel">Moodle (moodle.huji.ac.il)</span>
+          <input id="toggle-ka-moodle" class="switch-input" type="checkbox" role="switch" />
+        </label>
+        <p id="status-moodle" class="status-line"></p>
+      </div>
+      <div class="site-block">
+        <label class="switch-row">
+          <span data-i18n="moodleCsLabel">CS Moodle (moodle2.cs.huji.ac.il)</span>
+          <input id="toggle-ka-cs" class="switch-input" type="checkbox" role="switch" />
+        </label>
+        <p id="status-cs" class="status-line"></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span data-i18n="unofficialNotice">Unofficial student-built tool · 100% local on this device</span>
+    <a class="coffee-link" href="https://buymeacoffee.com/qusaidev" target="_blank" rel="noopener noreferrer">
+      <span aria-hidden="true">☕</span>
+      <span data-i18n="coffeeBtn">Buy me a coffee</span>
+    </a>
+  </footer>
+  <script src="popup.js"></script>
+</body>
+</html>
